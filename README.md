@@ -12,7 +12,7 @@ MacPilot is a native, local-first utility for macOS 13+. It combines a live over
 - **Clipboard:** opt in each launch, search up to 50 text items, copy or remove individual items, pause capture, and clear history. Text stays in memory.
 - **Menu bar:** live CPU/memory and a one-hour Keep Awake toggle.
 
-This is a developer preview, not a signed/notarized public release. See [the release roadmap](ROADMAP.md) for the remaining launch requirements.
+This is a developer preview, not a signed/notarized public release. Public release still requires Developer ID signing, notarization, and hands-on accessibility and hardware validation.
 
 ## Build and run
 
@@ -45,7 +45,7 @@ open build/MacPilot.app
 
 Run `swift test` and `bash build.sh` on macOS. Tests use isolated temporary folders and an injected move operation; they never touch real user caches or Trash. The GitHub Actions workflow runs tests, builds the bundle, verifies its ad-hoc signature, and uploads the preview.
 
-Before a public release, also complete the manual checks in [ROADMAP.md](ROADMAP.md). CI cannot establish that the interface looks right, that permissions behave well on a clean Mac, or that the utility stays lightweight under real workloads.
+Before a public release, also complete the manual checks below. CI cannot establish that the interface looks right, that permissions behave well on a clean Mac, or that the utility stays lightweight under real workloads.
 
 ## 0.3 feature expansion
 
