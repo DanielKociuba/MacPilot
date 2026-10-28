@@ -1,29 +1,27 @@
+import Combine
 import Foundation
 import AppKit
 
-@discardableResult
-func shell(_ exe: String, _ args: [String]) -> String {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: exe)
-    p.arguments = args
-    let out = Pipe()
-    p.standardOutput = out
-    p.standardError = Pipe()
-    do { try p.run() } catch { return "" }
-    let data = out.fileHandleForReading.readDataToEndOfFile()
-    p.waitUntilExit()
-    return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+struct CommandResult: Sendable {
+    let succeeded: Bool
+    let output: String
 }
 
-func dirSize(_ url: URL) -> Int64 {
-    guard let e = FileManager.default.enumerator(
-        at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
-        options: [], errorHandler: { _, _ in true }) else { return 0 }
-    var total: Int64 = 0
-    for case let u as URL in e {
-        total += Int64((try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
-    }
-    return total
+/// One pipe drains both streams so a full stderr pipe cannot deadlock the child.
+func runCommand(_ executable: String, _ arguments: [String]) -> CommandResult {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    do {
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return CommandResult(succeeded: process.terminationStatus == 0,
+                             output: String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+    } catch { return CommandResult(succeeded: false, output: error.localizedDescription) }
 }
 
 func fmt(_ bytes: Int64) -> String {
@@ -32,68 +30,101 @@ func fmt(_ bytes: Int64) -> String {
 
 @MainActor
 final class Tools: ObservableObject {
-    @Published var keepAwake = false
-    @Published var hiddenFiles = false
-    @Published var cacheSize: Int64 = 0
-    @Published var trashSize: Int64 = 0
-    @Published var status = ""
-
+    @Published private(set) var keepAwake = false
+    @Published private(set) var awakeUntil: Date?
+    @Published private(set) var hiddenFiles = false
+    @Published private(set) var entries: [CacheEntry] = []
+    @Published private(set) var scanning = false
+    @Published private(set) var cleaning = false
+    @Published private(set) var changingFinder = false
+    @Published private(set) var lastScan: Date?
+    @Published private(set) var skipped = 0
+    @Published private(set) var cleanupReport = ""
+    @Published private(set) var status = ""
     private var caffeinate: Process?
-    private let home = FileManager.default.homeDirectoryForCurrentUser
-    private var caches: URL { home.appendingPathComponent("Library/Caches") }
-    private var trash: URL { home.appendingPathComponent(".Trash") }
+    private var awakeTimer: Timer?
+    let caches = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches")
+    var cacheSize: Int64 { entries.reduce(0) { $0 + $1.bytes } }
 
     init() {
-        let v = shell("/usr/bin/defaults", ["read", "com.apple.finder", "AppleShowAllFiles"]).lowercased()
-        hiddenFiles = (v == "1" || v == "true" || v == "yes")
-        Task { await refreshSizes() }
+        hiddenFiles = UserDefaults(suiteName: "com.apple.finder")?.bool(forKey: "AppleShowAllFiles") ?? false
     }
 
-    // MARK: Keep awake
-    func setKeepAwake(_ on: Bool) {
-        caffeinate?.terminate(); caffeinate = nil
-        if on {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-            p.arguments = ["-d", "-i"]   // no display sleep, no idle sleep
-            try? p.run()
-            caffeinate = p
+    func setKeepAwake(_ on: Bool, minutes: Int? = nil) {
+        awakeTimer?.invalidate(); awakeTimer = nil
+        caffeinate?.terminationHandler = nil
+        if caffeinate?.isRunning == true { caffeinate?.terminate() }
+        caffeinate = nil
+        keepAwake = false
+        awakeUntil = nil
+        guard on else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        var arguments = ["-d", "-i", "-w", String(ProcessInfo.processInfo.processIdentifier)]
+        if let minutes { arguments += ["-t", String(minutes * 60)] }
+        process.arguments = arguments
+        process.terminationHandler = { [weak self] ended in
+            Task { @MainActor in
+                guard self?.caffeinate === ended else { return }
+                self?.keepAwake = false
+                self?.awakeUntil = nil
+                self?.caffeinate = nil
+            }
         }
-        keepAwake = on
+        do {
+            try process.run()
+            caffeinate = process
+            keepAwake = true
+            if let minutes {
+                awakeUntil = Date().addingTimeInterval(Double(minutes * 60))
+                awakeTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes * 60), repeats: false) { [weak self] _ in
+                    Task { @MainActor in self?.setKeepAwake(false) }
+                }
+            }
+            status = "Keep Awake started. Closing the lid can still put your Mac to sleep."
+        } catch { status = "Could not start Keep Awake: \(error.localizedDescription)" }
     }
 
-    // MARK: Finder hidden files
-    func setHiddenFiles(_ on: Bool) {
-        shell("/usr/bin/defaults", ["write", "com.apple.finder", "AppleShowAllFiles", "-bool", on ? "true" : "false"])
-        shell("/usr/bin/killall", ["Finder"])
+    func setHiddenFiles(_ on: Bool) async {
+        guard !changingFinder else { return }
+        changingFinder = true
+        defer { changingFinder = false }
+        let result = await Task.detached {
+            runCommand("/usr/bin/defaults", ["write", "com.apple.finder", "AppleShowAllFiles", "-bool", on ? "true" : "false"])
+        }.value
+        guard result.succeeded else { status = "Finder setting failed: \(result.output)"; return }
         hiddenFiles = on
+        let restart = await Task.detached { runCommand("/usr/bin/killall", ["Finder"]) }.value
+        status = restart.succeeded ? "Finder setting updated." : "Setting saved. Reopen Finder to apply it."
     }
 
-    // MARK: Cleaner
     func refreshSizes() async {
-        let c = caches, t = trash
-        cacheSize = await Task.detached { dirSize(c) }.value
-        trashSize = await Task.detached { dirSize(t) }.value
+        guard !scanning, !cleaning else { return }
+        scanning = true
+        defer { scanning = false }
+        let root = caches
+        do {
+            let scan = try await Task.detached { try CleanupService.scan(root: root) }.value
+            entries = scan.entries
+            skipped = scan.skipped
+            lastScan = Date()
+        } catch {
+            entries = []
+            lastScan = nil
+            status = "Could not scan caches: \(error.localizedDescription)"
+        }
     }
 
-    func cleanCaches() async {
-        let url = caches
-        let freed = await Task.detached { () -> Int64 in
-            let before = dirSize(url)
-            let items = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
-            for i in items { try? FileManager.default.removeItem(at: i) }
-            return max(0, before - dirSize(url))
-        }.value
-        status = "Freed \(fmt(freed)) from user caches"
+    func cleanCaches(ids: Set<URL>) async {
+        guard !scanning, !cleaning else { return }
+        let selected = entries.filter { ids.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        cleaning = true
+        let root = caches
+        let result = await Task.detached { CleanupService.moveToTrash(selected, root: root) }.value
+        cleanupReport = "Moved \(result.moved) folder(s) to Trash. Space is reclaimed only after you empty Trash in Finder."
+        if !result.failures.isEmpty { cleanupReport += "\n\n" + result.failures.joined(separator: "\n") }
+        cleaning = false
         await refreshSizes()
     }
-
-    func emptyTrash() async {
-        _ = await Task.detached {
-            shell("/usr/bin/osascript", ["-e", "tell application \"Finder\" to empty trash"])
-        }.value
-        status = "Trash emptied"
-        await refreshSizes()
-    }
-
 }

@@ -1,8 +1,17 @@
+import Combine
 import Foundation
 import IOKit.ps
 
+struct CPUSample: Identifiable {
+    let id = UUID()
+    let date: Date
+    let cpu: Double
+}
+
 @MainActor
 final class SystemStats: ObservableObject {
+    @Published var history: [CPUSample] = []
+    @Published var cpuReady = false
     @Published var cpu: Double = 0              // percent
     @Published var memUsed: Double = 0          // GB
     @Published var memTotal: Double = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
@@ -23,6 +32,10 @@ final class SystemStats: ObservableObject {
 
     func refresh() {
         readCPU(); readMemory(); readDisk(); readBattery()
+        if cpuReady {
+            history.append(CPUSample(date: Date(), cpu: cpu))
+            history = Array(history.suffix(60))
+        }
     }
 
     private func readCPU() {
@@ -39,7 +52,7 @@ final class SystemStats: ObservableObject {
         if let p = prevTicks {
             let d = zip(now, p).map { Double($0 &- $1) }
             let total = d.reduce(0, +)
-            if total > 0 { cpu = (d[0] + d[1] + d[3]) / total * 100 }
+            if total > 0 { cpu = (d[0] + d[1] + d[3]) / total * 100; cpuReady = true }
         }
         prevTicks = now
     }
@@ -70,9 +83,13 @@ final class SystemStats: ObservableObject {
         let snap = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let list = IOPSCopyPowerSourcesList(snap).takeRetainedValue() as [CFTypeRef]
         battery = nil
+        charging = false
         for ps in list {
             guard let d = IOPSGetPowerSourceDescription(snap, ps)?.takeUnretainedValue() as? [String: Any] else { continue }
-            battery = d[kIOPSCurrentCapacityKey] as? Int
+            guard d[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
+                  let current = d[kIOPSCurrentCapacityKey] as? Int,
+                  let maximum = d[kIOPSMaxCapacityKey] as? Int, maximum > 0 else { continue }
+            battery = min(100, max(0, Int(Double(current) / Double(maximum) * 100)))
             charging = (d[kIOPSIsChargingKey] as? Bool) ?? false
         }
     }
