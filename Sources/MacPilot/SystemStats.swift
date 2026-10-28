@@ -19,11 +19,27 @@ final class SystemStats: ObservableObject {
     @Published var diskTotal: Int64 = 0
     @Published var battery: Int?                // nil on desktops
     @Published var charging = false
+    @Published var onAC = false
+    @Published var memoryPressure = "Waiting for pressure events"
+    @Published var batteryHistory: [BatterySample] = []
+    private var pressureSource: DispatchSourceMemoryPressure?
+    private let batteryKey = "batteryHistory"
 
     private var prevTicks: [UInt32]?
     private var timer: Timer?
 
     init() {
+        if let data = UserDefaults.standard.data(forKey: batteryKey), let saved = try? JSONDecoder().decode([BatterySample].self, from: data) { batteryHistory = saved.filter { $0.date > Date().addingTimeInterval(-7 * 86400) } }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: .main)
+        source.setEventHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let event = self?.pressureSource?.data else { return }
+                if event.contains(.critical) { self?.memoryPressure = "Critical" }
+                else if event.contains(.warning) { self?.memoryPressure = "Warning" }
+                else { self?.memoryPressure = "Normal" }
+            }
+        }
+        pressureSource = source; source.resume()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
@@ -32,18 +48,27 @@ final class SystemStats: ObservableObject {
 
     func refresh() {
         readCPU(); readMemory(); readDisk(); readBattery()
+        if let battery, Date().timeIntervalSince(batteryHistory.last?.date ?? .distantPast) >= 60 {
+            batteryHistory.append(BatterySample(date: Date(), percent: battery, onAC: onAC))
+            batteryHistory = Array(batteryHistory.filter { $0.date > Date().addingTimeInterval(-7 * 86400) }.suffix(10080))
+            if let data = try? JSONEncoder().encode(batteryHistory) { UserDefaults.standard.set(data, forKey: batteryKey) }
+        }
         if cpuReady {
             history.append(CPUSample(date: Date(), cpu: cpu))
             history = Array(history.suffix(60))
         }
     }
 
+    func clearBatteryHistory() { batteryHistory = []; UserDefaults.standard.removeObject(forKey: batteryKey) }
+
     private func readCPU() {
         var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.stride / MemoryLayout<integer_t>.stride)
         var info = host_cpu_load_info()
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
         let r = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(size)) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &size)
+                host_statistics(host, HOST_CPU_LOAD_INFO, $0, &size)
             }
         }
         guard r == KERN_SUCCESS else { return }
@@ -60,9 +85,11 @@ final class SystemStats: ObservableObject {
     private func readMemory() {
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.stride / MemoryLayout<integer_t>.stride)
         var s = vm_statistics64()
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
         let r = withUnsafeMutablePointer(to: &s) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(host, HOST_VM_INFO64, $0, &count)
             }
         }
         guard r == KERN_SUCCESS else { return }
@@ -84,12 +111,14 @@ final class SystemStats: ObservableObject {
         let list = IOPSCopyPowerSourcesList(snap).takeRetainedValue() as [CFTypeRef]
         battery = nil
         charging = false
+        onAC = false
         for ps in list {
             guard let d = IOPSGetPowerSourceDescription(snap, ps)?.takeUnretainedValue() as? [String: Any] else { continue }
             guard d[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
                   let current = d[kIOPSCurrentCapacityKey] as? Int,
                   let maximum = d[kIOPSMaxCapacityKey] as? Int, maximum > 0 else { continue }
             battery = min(100, max(0, Int(Double(current) / Double(maximum) * 100)))
+            onAC = d[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue
             charging = (d[kIOPSIsChargingKey] as? Bool) ?? false
         }
     }

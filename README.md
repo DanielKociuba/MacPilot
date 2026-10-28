@@ -12,7 +12,7 @@ MacPilot is a native, local-first utility for macOS 13+. It combines a live over
 - **Clipboard:** opt in each launch, search up to 50 text items, copy or remove individual items, pause capture, and clear history. Text stays in memory.
 - **Menu bar:** live CPU/memory and a one-hour Keep Awake toggle.
 
-This is a developer preview, not a signed/notarized public release. See [the release roadmap](ROADMAP.md) for the remaining launch requirements.
+This is a developer preview, not a signed/notarized public release. Public release still requires Developer ID signing, notarization, and hands-on accessibility and hardware validation.
 
 ## Build and run
 
@@ -45,4 +45,24 @@ open build/MacPilot.app
 
 Run `swift test` and `bash build.sh` on macOS. Tests use isolated temporary folders and an injected move operation; they never touch real user caches or Trash. The GitHub Actions workflow runs tests, builds the bundle, verifies its ad-hoc signature, and uploads the preview.
 
-Before a public release, also complete the manual checks in [ROADMAP.md](ROADMAP.md). CI cannot establish that the interface looks right, that permissions behave well on a clean Mac, or that the utility stays lightweight under real workloads.
+Before a public release, also complete the manual checks below. CI cannot establish that the interface looks right, that permissions behave well on a clean Mac, or that the utility stays lightweight under real workloads.
+
+## 0.3 feature expansion
+
+All tools now have direct sidebar destinations and are searchable with Command–K. Command–Shift–Space opens the launcher globally while MacPilot is running; a shortcut-registration failure is shown in the launcher. The menu-bar window includes favorite tools, system readings, Keep Awake, clipboard capture/recent items, and work modes.
+
+- **Diagnostics:** current process snapshot, CPU observations, thermal state, and memory-pressure events. “Waiting for pressure events” is deliberately not a claim of normal pressure. Activity Monitor remains available for more detail.
+- **Large files:** cancellable user-selected-folder scan, largest-file chart, name/extension and age filters, Finder reveal, confirmed Trash moves and undo. The list retains the largest 1,000 files, not a complete disk inventory. Packages and symlinks are excluded; size is logical size.
+- **Organizer:** preview immediate files grouped into Images, Documents, Archives, Installers, Video, Audio, or Other. Age filtering and active-download exclusions apply. Nothing is preselected; conflicting destinations are skipped. Successful moves are undoable.
+- **App removal:** explicit selection of a third-party app and exact bundle-ID matches in user caches, preferences, application support, and saved state. Shared containers/extensions and ambiguous leftovers are excluded. Running apps must be quit. No privilege escalation, permanent deletion, or promise of complete removal.
+- **Change history:** persistent local records of successful moves and Trash locations, with identity-checked undo that refuses occupied original paths. Undo is unavailable after the moved file disappears or its identity changes. Settings and image-export notes are session-only. Clear history removes records, not files.
+- **Work modes:** saved editable presets for timed Keep Awake, pausing clipboard capture, and launching selected apps. Start shows all effects. End restores the previous capture setting and stops Keep Awake; apps remain open. Modes remain active after their awake timer expires until explicitly ended. They do not change Focus, audio, or notifications.
+- **Presentation check:** battery/power warning, connected displays, default audio output, and a Sound settings shortcut.
+- **Battery:** up to seven days of local one-minute samples while running, charging/power state, cycle/capacity details where reported, and an observed drain estimate after at least ten continuous battery-powered minutes. Sleep gaps and power changes reset the rate window. Capacity ratios are estimates, not Apple’s health diagnosis. Clear history is available.
+- **Images:** multi-file PNG/JPEG export, longest-edge resize without upscaling, JPEG quality, batch names, orientation correction, and metadata removal. Originals and existing destination files are never overwritten. Cancellation occurs between images. Animated/multi-page images export their first frame. PNG retains alpha; JPEG uses white.
+- **Drives:** mounted-volume capacity, Finder access, and confirmed OS-managed eject with visible errors; no forced ejection.
+- **Text:** explicit paste, uppercase/lowercase, stable line deduplication, JSON formatting, and plain-text copy. No automatic clipboard reading by this tool.
+
+Local settings, presets, and battery samples use UserDefaults. File undo records (including paths) live in `~/Library/Application Support/MacPilot/history.json`. Clipboard text is still session-only and capture starts off at each launch. No network service is required.
+
+Additional manual checks for 0.3: test global-shortcut conflicts and reopening a closed main window; undo with occupied/missing paths and after Trash is emptied; mixed successful/failed organizer moves; running-app removal refusal; image batches with duplicate output names and cancellation; clipboard restoration across sidebar navigation; AC/battery transitions and sleep gaps; audio/display changes; ejecting a busy external drive; keyboard/VoiceOver operation in the expanded menu panel.

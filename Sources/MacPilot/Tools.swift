@@ -57,7 +57,7 @@ final class Tools: ObservableObject {
         caffeinate = nil
         keepAwake = false
         awakeUntil = nil
-        guard on else { return }
+        guard on else { ActionHistory.shared.note("Stopped Keep Awake"); return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
         var arguments = ["-d", "-i", "-w", String(ProcessInfo.processInfo.processIdentifier)]
@@ -81,6 +81,7 @@ final class Tools: ObservableObject {
                     Task { @MainActor [weak self] in self?.setKeepAwake(false) }
                 }
             }
+            ActionHistory.shared.note("Started Keep Awake")
             status = "Keep Awake started. Closing the lid can still put your Mac to sleep."
         } catch { status = "Could not start Keep Awake: \(error.localizedDescription)" }
     }
@@ -94,6 +95,7 @@ final class Tools: ObservableObject {
         }.value
         guard result.succeeded else { status = "Finder setting failed: \(result.output)"; return }
         hiddenFiles = on
+        ActionHistory.shared.note("Finder hidden files: \(on ? "shown" : "hidden")")
         let restart = await Task.detached { runCommand("/usr/bin/killall", ["Finder"]) }.value
         status = restart.succeeded ? "Finder setting updated." : "Setting saved. Reopen Finder to apply it."
     }
@@ -120,9 +122,15 @@ final class Tools: ObservableObject {
         let selected = entries.filter { ids.contains($0.id) }
         guard !selected.isEmpty else { return }
         cleaning = true
-        let root = caches
-        let result = await Task.detached { CleanupService.moveToTrash(selected, root: root) }.value
-        cleanupReport = "Moved \(result.moved) folder(s) to Trash. Space is reclaimed only after you empty Trash in Finder."
+        var result = CleanupResult()
+        for entry in selected {
+            do {
+                guard CleanupService.isEligible(entry.url, root: caches) else { throw CocoaError(.fileReadNoPermission) }
+                try ActionHistory.shared.trash(entry.url, reason: "Cache cleanup")
+                result.moved += 1
+            } catch { result.failures.append("\(entry.name): \(error.localizedDescription)") }
+        }
+        cleanupReport = "Moved \(result.moved) folder(s) to Trash. Undo is available in Change history until Trash is emptied. Space is reclaimed only after you empty Trash in Finder."
         if !result.failures.isEmpty { cleanupReport += "\n\n" + result.failures.joined(separator: "\n") }
         cleaning = false
         await refreshSizes()
