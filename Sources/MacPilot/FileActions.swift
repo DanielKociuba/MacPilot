@@ -170,7 +170,7 @@ struct OrganizerView: View {
             status = "\(plan.count) eligible files · \(skipped) skipped, including folders, recent files, and conflicts."
         } catch { status = error.localizedDescription }
     }
-    private func apply() {
+    @MainActor private func apply() {
         var moved = Set<URL>(); var failures: [String] = []
         for item in plan where selection.contains(item.id) {
             do {
@@ -243,7 +243,7 @@ struct AppRemovalView: View {
         }
         status = "\(id) · Nothing selected automatically."
     }
-    private func remove() {
+    @MainActor private func remove() {
         guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty else { status = "Quit the app before removing its files."; return }
         var removed = Set<URL>(); var errors: [String] = []
         for candidate in candidates where selected.contains(candidate.id) {

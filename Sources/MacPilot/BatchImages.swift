@@ -72,7 +72,7 @@ struct BatchImagesView: View {
         guard picker.runModal() == .OK, let folder = picker.url else { return }
         let sources = inputs; let configuration = options
         busy = true; completed = 0; status = ""
-        job = Task {
+        job = Task { @MainActor in
             var exported = 0; var failures: [String] = []
             for (index, source) in sources.enumerated() {
                 if Task.isCancelled { break }

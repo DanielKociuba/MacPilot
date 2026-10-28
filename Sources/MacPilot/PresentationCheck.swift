@@ -32,6 +32,9 @@ struct PresentationCheckView: View {
         address.mSelector = kAudioObjectPropertyName
         var name: CFString = "Unknown" as CFString
         size = UInt32(MemoryLayout<CFString>.size)
-        audio = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name) == noErr ? name as String : "Unavailable"
+        let result = withUnsafeMutablePointer(to: &name) { pointer in
+            AudioObjectGetPropertyData(device, &address, 0, nil, &size, pointer)
+        }
+        audio = result == noErr ? name as String : "Unavailable"
     }
 }
