@@ -49,16 +49,18 @@ final class CleanupServiceTests: XCTestCase {
     }
 
     func testOnlySelectedEntriesMoveAndFailuresAreReported() throws {
-        let first = try folder("first")
-        let second = try folder("second")
+        _ = try folder("first")
+        _ = try folder("second")
         _ = try folder("unselected")
-        let selected = try CleanupService.scan(root: root).entries.filter { $0.url.path == first.path || $0.url.path == second.path }
+        let scan = try CleanupService.scan(root: root)
+        XCTAssertEqual(Set(scan.entries.map(\.name)), Set(["first", "second", "unselected"]))
+        let selected = scan.entries.filter { $0.name != "unselected" }
         var attempted: [URL] = []
         let result = CleanupService.moveToTrash(selected, root: root) { url in
             attempted.append(url)
-            if url.path == second.path { throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError) }
+            if url.lastPathComponent == "second" { throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError) }
         }
-        XCTAssertEqual(Set(attempted.map(\.path)), Set([first.path, second.path]))
+        XCTAssertEqual(Set(attempted.map(\.lastPathComponent)), Set(["first", "second"]))
         XCTAssertEqual(result.moved, 1)
         XCTAssertEqual(result.failures.count, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("unselected").path))
