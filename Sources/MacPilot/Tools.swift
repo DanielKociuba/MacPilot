@@ -64,7 +64,7 @@ final class Tools: ObservableObject {
         if let minutes { arguments += ["-t", String(minutes * 60)] }
         process.arguments = arguments
         process.terminationHandler = { [weak self] ended in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard self?.caffeinate === ended else { return }
                 self?.keepAwake = false
                 self?.awakeUntil = nil
@@ -78,7 +78,7 @@ final class Tools: ObservableObject {
             if let minutes {
                 awakeUntil = Date().addingTimeInterval(Double(minutes * 60))
                 awakeTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes * 60), repeats: false) { [weak self] _ in
-                    Task { @MainActor in self?.setKeepAwake(false) }
+                    Task { @MainActor [weak self] in self?.setKeepAwake(false) }
                 }
             }
             status = "Keep Awake started. Closing the lid can still put your Mac to sleep."

@@ -17,7 +17,7 @@ final class ClipboardStore: ObservableObject {
         lastCount = NSPasteboard.general.changeCount
         if value {
             timer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.poll() }
+                Task { @MainActor [weak self] in self?.poll() }
             }
         }
     }

@@ -23,9 +23,9 @@ enum CleanupService {
     static func isEligible(_ url: URL, root: URL) -> Bool {
         let root = root.standardizedFileURL
         let candidate = url.standardizedFileURL
-        guard root.resolvingSymlinksInPath() == root,
-              candidate.deletingLastPathComponent() == root,
-              candidate.resolvingSymlinksInPath() == candidate,
+        guard root.resolvingSymlinksInPath().path == root.path,
+              candidate.deletingLastPathComponent().path == root.path,
+              candidate.resolvingSymlinksInPath().path == candidate.path,
               let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
               values.isDirectory == true, values.isSymbolicLink != true else { return false }
         return true

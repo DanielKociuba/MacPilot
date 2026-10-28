@@ -52,13 +52,13 @@ final class CleanupServiceTests: XCTestCase {
         let first = try folder("first")
         let second = try folder("second")
         _ = try folder("unselected")
-        let selected = try CleanupService.scan(root: root).entries.filter { $0.url == first || $0.url == second }
+        let selected = try CleanupService.scan(root: root).entries.filter { $0.url.path == first.path || $0.url.path == second.path }
         var attempted: [URL] = []
         let result = CleanupService.moveToTrash(selected, root: root) { url in
             attempted.append(url)
-            if url == second { throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError) }
+            if url.path == second.path { throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError) }
         }
-        XCTAssertEqual(Set(attempted), Set([first, second]))
+        XCTAssertEqual(Set(attempted.map(\.path)), Set([first.path, second.path]))
         XCTAssertEqual(result.moved, 1)
         XCTAssertEqual(result.failures.count, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("unselected").path))
