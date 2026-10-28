@@ -28,6 +28,9 @@ struct ContentView: View {
     @State private var panel: Panel? = .dashboard
     @State private var showCommands = false
     @State private var commandQuery = ""
+    @EnvironmentObject private var commandClipboard: ClipboardStore
+    @EnvironmentObject private var commandTools: Tools
+    @AppStorage("favoritePanels") private var commandFavorites = "Overview,Clipboard,Large files"
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var launcher = Launcher.shared
     var body: some View {
@@ -82,13 +85,33 @@ struct ContentView: View {
         .sheet(isPresented: $showCommands) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Find a tool").font(.title2.bold())
-                TextField("Search sections", text: $commandQuery).textFieldStyle(.roundedBorder)
-                ForEach(Panel.allCases.filter { commandQuery.isEmpty || $0.rawValue.localizedCaseInsensitiveContains(commandQuery) }) { item in
-                    Button { panel = item; showCommands = false } label: { Label(item.rawValue, systemImage: item.icon) }
+                TextField("Search tools or captured clipboard text", text: $commandQuery).textFieldStyle(.roundedBorder)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Panel.allCases.filter { commandQuery.isEmpty || $0.rawValue.localizedCaseInsensitiveContains(commandQuery) }.sorted {
+                            let favorites = commandFavorites.components(separatedBy: ",")
+                            return favorites.contains($0.rawValue) && !favorites.contains($1.rawValue)
+                        }) { item in
+                            Button { panel = item; showCommands = false } label: {
+                                Label(item.rawValue + (commandFavorites.components(separatedBy: ",").contains(item.rawValue) ? " ★" : ""), systemImage: item.icon)
+                            }
+                        }
+                        if commandQuery.isEmpty || "keep awake".localizedCaseInsensitiveContains(commandQuery) {
+                            Divider()
+                            Button(commandTools.keepAwake ? "Stop Keep Awake" : "Keep Awake for one hour") { commandTools.setKeepAwake(!commandTools.keepAwake, minutes: 60); showCommands = false }
+                        }
+                        if !commandQuery.isEmpty {
+                            Divider()
+                            Text("Matching clipboard text").font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(commandClipboard.items.filter { $0.localizedCaseInsensitiveContains(commandQuery) }.prefix(5)), id: \.self) { item in
+                                Button { commandClipboard.copy(item); showCommands = false } label: { Text(item).lineLimit(2) }
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(launcher.status).font(.caption).foregroundStyle(.secondary)
                 Button("Close") { showCommands = false }.keyboardShortcut(.cancelAction)
-            }.padding(24).frame(width: 360)
+            }.padding(24).frame(width: 460, height: 520)
         }
     }
 }

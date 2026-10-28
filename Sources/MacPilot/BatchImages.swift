@@ -37,42 +37,47 @@ enum ImageExporter {
     }
 }
 
+@MainActor final class ImageBatchSession: ObservableObject {
+    static let shared = ImageBatchSession()
+    @Published var inputs: [URL] = []
+    @Published var options = ImageExportOptions()
+    @Published var status = ""
+    @Published var completed = 0
+    @Published var busy = false
+    var job: Task<Void, Never>?
+}
+
 struct BatchImagesView: View {
-    @State private var inputs: [URL] = []
-    @State private var options = ImageExportOptions()
-    @State private var status = ""
-    @State private var completed = 0
-    @State private var busy = false
-    @State private var job: Task<Void, Never>?
+    @ObservedObject private var session = ImageBatchSession.shared
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             PageHeading(title: "Images ready to share", subtitle: "Batch resize, convert, compress, rename, and strip metadata locally. Source files stay untouched.")
             HStack {
                 Button("Choose images…") {
                     let panel = NSOpenPanel(); panel.allowedContentTypes = [.png, .jpeg, .tiff, .heic]; panel.allowsMultipleSelection = true
-                    if panel.runModal() == .OK { inputs = panel.urls }
-                }.disabled(busy)
-                Button("Export to folder…") { export() }.disabled(inputs.isEmpty || busy || options.prefix.contains("/") || options.prefix.contains(":"))
-                Button("Cancel") { job?.cancel() }.disabled(!busy)
+                    if panel.runModal() == .OK { session.inputs = panel.urls }
+                }.disabled(session.busy)
+                Button("Export to folder…") { export() }.disabled(session.inputs.isEmpty || session.busy || session.options.prefix.contains("/") || session.options.prefix.contains(":"))
+                Button("Cancel") { session.job?.cancel() }.disabled(!session.busy)
             }
             Group {
-                Toggle("JPEG (white background for transparent areas)", isOn: $options.jpeg)
-                HStack { Text("JPEG quality"); Slider(value: $options.quality, in: 0.1...1); Text("\(Int(options.quality * 100))%").monospacedDigit() }.disabled(!options.jpeg)
-                Picker("Longest edge", selection: $options.maxPixels) { Text("Original size").tag(0); Text("3840 px").tag(3840); Text("1920 px").tag(1920); Text("1280 px").tag(1280); Text("800 px").tag(800) }
-                TextField("Optional batch name (e.g. holiday → holiday-001)", text: $options.prefix)
-            }.disabled(busy)
+                Toggle("JPEG (white background for transparent areas)", isOn: $session.options.jpeg)
+                HStack { Text("JPEG quality"); Slider(value: $session.options.quality, in: 0.1...1); Text("\(Int(session.options.quality * 100))%").monospacedDigit() }.disabled(!session.options.jpeg)
+                Picker("Longest edge", selection: $session.options.maxPixels) { Text("Original size").tag(0); Text("3840 px").tag(3840); Text("1920 px").tag(1920); Text("1280 px").tag(1280); Text("800 px").tag(800) }
+                TextField("Optional batch name (e.g. holiday → holiday-001)", text: $session.options.prefix)
+            }.disabled(session.busy)
             Text("Preview names below. Metadata is removed; image orientation is applied. Multi-page images export the first frame. Existing outputs are skipped, never overwritten. PNG is lossless; JPEG quality controls compression.").font(.caption).foregroundStyle(.secondary)
-            if busy { ProgressView(value: Double(completed), total: Double(max(inputs.count, 1))) }
-            Text(status).textSelection(.enabled)
-            List(Array(inputs.enumerated()), id: \.element) { index, url in Text(url.lastPathComponent + " → " + ImageExporter.name(source: url, index: index, options: options)) }
+            if session.busy { ProgressView(value: Double(session.completed), total: Double(max(session.inputs.count, 1))) }
+            Text(session.status).textSelection(.enabled)
+            List(Array(session.inputs.enumerated()), id: \.element) { index, url in Text(url.lastPathComponent + " → " + ImageExporter.name(source: url, index: index, options: session.options)) }
         }.padding(24)
     }
-    private func export() {
+    @MainActor private func export() {
         let picker = NSOpenPanel(); picker.canChooseFiles = false; picker.canChooseDirectories = true
         guard picker.runModal() == .OK, let folder = picker.url else { return }
-        let sources = inputs; let configuration = options
-        busy = true; completed = 0; status = ""
-        job = Task { @MainActor in
+        let sources = session.inputs; let configuration = session.options
+        session.busy = true; session.completed = 0; session.status = ""
+        session.job = Task { @MainActor in
             var exported = 0; var failures: [String] = []
             for (index, source) in sources.enumerated() {
                 if Task.isCancelled { break }
@@ -81,11 +86,11 @@ struct BatchImagesView: View {
                     try await Task.detached { try ImageExporter.export(source, to: destination, options: configuration) }.value
                     exported += 1
                 } catch { failures.append("\(source.lastPathComponent): \(error.localizedDescription)") }
-                completed = index + 1
+                session.completed = index + 1
             }
-            status = "\(Task.isCancelled ? "Cancelled. " : "")Exported \(exported) of \(sources.count).\n" + failures.joined(separator: "\n")
+            session.status = "\(Task.isCancelled ? "Cancelled. " : "")Exported \(exported) of \(sources.count).\n" + failures.joined(separator: "\n")
             ActionHistory.shared.note("Exported \(exported) images to \(folder.path); originals unchanged")
-            busy = false
+            session.busy = false
         }
     }
 }

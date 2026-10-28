@@ -39,6 +39,7 @@ struct MenuPanel: View {
     @AppStorage("favoritePanels") private var favorites = "Overview,Clipboard,Large files"
     @ObservedObject private var modes = ModeStore.shared
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             HStack { Label("MacPilot", systemImage: "command.circle.fill").font(.title2.bold()); Spacer(); Button("Open") { open(.dashboard) } }
             HStack {
@@ -58,6 +59,7 @@ struct MenuPanel: View {
                 if modes.active != nil { Button("End mode") { modes.stop(tools: tools, clipboard: clipboard) } }
             }
             Divider()
+            Text(modes.status).font(.caption).foregroundStyle(.secondary).lineLimit(3)
             Text("Favorites").font(.headline)
             ForEach(Panel.allCases.filter { favorites.components(separatedBy: ",").contains($0.rawValue) }) { panel in
                 Button { open(panel) } label: { Label(panel.rawValue, systemImage: panel.icon) }
@@ -75,7 +77,8 @@ struct MenuPanel: View {
             ForEach(Array(clipboard.items.prefix(3)), id: \.self) { item in Button { clipboard.copy(item) } label: { Text(item).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading) } }
             Text(clipboard.feedback).font(.caption).foregroundStyle(.secondary)
             HStack { Button("Find a tool") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true); NotificationCenter.default.post(name: .pilotLauncher, object: nil) }; Spacer(); Button("Quit") { NSApp.terminate(nil) } }
-        }.padding(20).frame(width: 360)
+        }.padding(20)
+        }.frame(width: 360, height: 570)
     }
     private func open(_ panel: Panel) {
         UserDefaults.standard.set(panel.rawValue, forKey: "requestedPanel")
