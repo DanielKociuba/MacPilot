@@ -1,15 +1,23 @@
-   name: Build MacPilot
-   on:
-     push:
-     workflow_dispatch:
-   jobs:
-     build:
-       runs-on: macos-latest
-       steps:
-         - uses: actions/checkout@v4
-         - run: bash build.sh
-         - run: ditto -c -k --keepParent build/MacPilot.app MacPilot-app.zip
-         - uses: actions/upload-artifact@v4
-           with:
-             name: MacPilot-app
-             path: MacPilot-app.zip
+name: Build and test MacPilot
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test cleanup boundaries
+        run: swift test
+      - name: Build app bundle
+        run: bash build.sh
+      - name: Verify bundle signature
+        run: codesign --verify --deep --strict build/MacPilot.app
+      - run: ditto -c -k --keepParent build/MacPilot.app MacPilot-app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacPilot-preview
+          path: MacPilot-app.zip

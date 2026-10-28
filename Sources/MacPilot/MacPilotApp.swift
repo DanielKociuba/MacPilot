@@ -12,7 +12,10 @@ struct MacPilotApp: App {
                 .environmentObject(stats)
                 .environmentObject(tools)
                 .environmentObject(clip)
-                .frame(minWidth: 760, minHeight: 500)
+                .frame(minWidth: 920, minHeight: 640)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    tools.setKeepAwake(false)
+                }
         }
 
         MenuBarExtra {
@@ -33,7 +36,7 @@ struct MenuContent: View {
     var body: some View {
         Text("CPU \(Int(stats.cpu))%  ·  RAM \(String(format: "%.1f", stats.memUsed))/\(String(format: "%.0f", stats.memTotal)) GB")
         Divider()
-        Toggle("Keep Awake", isOn: Binding(get: { tools.keepAwake }, set: { tools.setKeepAwake($0) }))
+        Toggle("Keep Awake for 1 hour", isOn: Binding(get: { tools.keepAwake }, set: { tools.setKeepAwake($0, minutes: 60) }))
         Button("Open MacPilot") {
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
