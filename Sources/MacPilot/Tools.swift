@@ -89,12 +89,11 @@ final class Tools: ObservableObject {
     }
 
     func emptyTrash() async {
-        await Task.detached {
+        _ = await Task.detached {
             shell("/usr/bin/osascript", ["-e", "tell application \"Finder\" to empty trash"])
         }.value
         status = "Trash emptied"
         await refreshSizes()
     }
 
-    deinit { caffeinate?.terminate() }
 }

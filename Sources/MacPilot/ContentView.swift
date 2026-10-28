@@ -43,7 +43,7 @@ struct StatCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.gray.opacity(0.15)))
     }
 }
 
@@ -83,7 +83,9 @@ struct CleanerView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Cleaner")
-        .toolbar { Button("Rescan", systemImage: "arrow.clockwise") { Task { await t.refreshSizes() } } }
+        .toolbar {
+            Button { Task { await t.refreshSizes() } } label: { Label("Rescan", systemImage: "arrow.clockwise") }
+        }
     }
 
     private func row(_ title: String, size: Int64, button: String, action: @escaping () async -> Void) -> some View {
@@ -112,8 +114,12 @@ struct ClipboardView: View {
     var body: some View {
         Group {
             if c.items.isEmpty {
-                ContentUnavailableView("Nothing copied yet", systemImage: "doc.on.clipboard",
-                                       description: Text("Text you copy will show up here."))
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.on.clipboard").font(.system(size: 40)).foregroundStyle(.secondary)
+                    Text("Nothing copied yet").font(.headline)
+                    Text("Text you copy will show up here.").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(c.items, id: \.self) { item in
                     Text(item).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
@@ -124,6 +130,8 @@ struct ClipboardView: View {
             }
         }
         .navigationTitle("Clipboard")
-        .toolbar { Button("Clear", systemImage: "trash") { c.clear() }.disabled(c.items.isEmpty) }
+        .toolbar {
+            Button { c.clear() } label: { Label("Clear", systemImage: "trash") }.disabled(c.items.isEmpty)
+        }
     }
 }
