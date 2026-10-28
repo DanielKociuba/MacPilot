@@ -30,6 +30,7 @@ func fmt(_ bytes: Int64) -> String {
 
 @MainActor
 final class Tools: ObservableObject {
+    @Published var presentationCapture: Bool?
     @Published private(set) var keepAwake = false
     @Published private(set) var awakeUntil: Date?
     @Published private(set) var hiddenFiles = false

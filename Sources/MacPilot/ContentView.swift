@@ -2,7 +2,7 @@ import SwiftUI
 import Charts
 
 enum Panel: String, CaseIterable, Identifiable {
-    case dashboard = "Overview", cleaner = "Storage", toggles = "Quick controls", clipboard = "Clipboard"
+    case dashboard = "Overview", cleaner = "Storage", toggles = "Quick controls", clipboard = "Clipboard", workbench = "Workbench"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -10,12 +10,15 @@ enum Panel: String, CaseIterable, Identifiable {
         case .cleaner: return "internaldrive"
         case .toggles: return "slider.horizontal.3"
         case .clipboard: return "doc.on.clipboard"
+        case .workbench: return "wrench.and.screwdriver"
         }
     }
 }
 
 struct ContentView: View {
     @State private var panel: Panel? = .dashboard
+    @State private var showCommands = false
+    @State private var commandQuery = ""
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
@@ -37,9 +40,24 @@ struct ContentView: View {
             case .cleaner: CleanerView()
             case .toggles: TogglesView()
             case .clipboard: ClipboardView()
+            case .workbench: WorkbenchView()
             }
         }
         .tint(.teal)
+        .toolbar {
+            Button { showCommands = true } label: { Label("Find a tool", systemImage: "magnifyingglass") }
+                .keyboardShortcut("k", modifiers: .command)
+        }
+        .sheet(isPresented: $showCommands) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Find a tool").font(.title2.bold())
+                TextField("Search sections", text: $commandQuery).textFieldStyle(.roundedBorder)
+                ForEach(Panel.allCases.filter { commandQuery.isEmpty || $0.rawValue.localizedCaseInsensitiveContains(commandQuery) }) { item in
+                    Button { panel = item; showCommands = false } label: { Label(item.rawValue, systemImage: item.icon) }
+                }
+                Button("Close") { showCommands = false }.keyboardShortcut(.cancelAction)
+            }.padding(24).frame(width: 360)
+        }
     }
 }
 
