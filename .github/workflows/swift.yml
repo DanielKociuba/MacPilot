@@ -3,14 +3,17 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+concurrency:
+  group: macpilot-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test cleanup boundaries
+      - name: Test utility workflows
         run: swift test
       - name: Build app bundle
         run: bash build.sh
