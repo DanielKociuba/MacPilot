@@ -2,7 +2,7 @@ import SwiftUI
 import Charts
 
 enum Panel: String, CaseIterable, Identifiable {
-    case dashboard = "Overview", cleaner = "Storage", toggles = "Quick controls", clipboard = "Clipboard", workbench = "Workbench"
+    case dashboard = "Overview", cleaner = "Storage", toggles = "Quick controls", clipboard = "Clipboard", workbench = "Diagnostics", files = "Large files", modes = "Work modes", images = "Image tools", text = "Text tools", drives = "Drives", battery = "Battery", organizer = "Organizer", removal = "App removal", history = "Change history"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -10,7 +10,16 @@ enum Panel: String, CaseIterable, Identifiable {
         case .cleaner: return "internaldrive"
         case .toggles: return "slider.horizontal.3"
         case .clipboard: return "doc.on.clipboard"
-        case .workbench: return "wrench.and.screwdriver"
+        case .workbench: return "stethoscope"
+        case .files: return "folder"
+        case .modes: return "sparkles"
+        case .images: return "photo"
+        case .text: return "textformat"
+        case .drives: return "externaldrive"
+        case .battery: return "battery.100"
+        case .organizer: return "tray.2"
+        case .removal: return "app.badge"
+        case .history: return "clock.arrow.circlepath"
         }
     }
 }
@@ -19,6 +28,8 @@ struct ContentView: View {
     @State private var panel: Panel? = .dashboard
     @State private var showCommands = false
     @State private var commandQuery = ""
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var launcher = Launcher.shared
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
@@ -40,10 +51,30 @@ struct ContentView: View {
             case .cleaner: CleanerView()
             case .toggles: TogglesView()
             case .clipboard: ClipboardView()
-            case .workbench: WorkbenchView()
+            case .workbench: DiagnosticsView()
+            case .files: FileExplorerView()
+            case .modes: CustomModesView()
+            case .images: BatchImagesView()
+            case .text: TextWorkbenchView()
+            case .drives: DrivesView()
+            case .battery: BatteryInsightsView()
+            case .organizer: OrganizerView()
+            case .removal: AppRemovalView()
+            case .history: HistoryView()
             }
         }
         .tint(.teal)
+        .onAppear {
+            launcher.openWindow = { openWindow(id: "main") }
+            launcher.register()
+            if let requested = UserDefaults.standard.string(forKey: "requestedPanel"), let target = Panel(rawValue: requested) { panel = target; UserDefaults.standard.removeObject(forKey: "requestedPanel") }
+            if launcher.requested { showCommands = true; launcher.requested = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pilotNavigate)) { event in
+            if let name = event.object as? String, let target = Panel(rawValue: name) { panel = target; UserDefaults.standard.removeObject(forKey: "requestedPanel") }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pilotLauncher)) { _ in showCommands = true; launcher.requested = false }
+
         .toolbar {
             Button { showCommands = true } label: { Label("Find a tool", systemImage: "magnifyingglass") }
                 .keyboardShortcut("k", modifiers: .command)
@@ -55,6 +86,7 @@ struct ContentView: View {
                 ForEach(Panel.allCases.filter { commandQuery.isEmpty || $0.rawValue.localizedCaseInsensitiveContains(commandQuery) }) { item in
                     Button { panel = item; showCommands = false } label: { Label(item.rawValue, systemImage: item.icon) }
                 }
+                Text(launcher.status).font(.caption).foregroundStyle(.secondary)
                 Button("Close") { showCommands = false }.keyboardShortcut(.cancelAction)
             }.padding(24).frame(width: 360)
         }

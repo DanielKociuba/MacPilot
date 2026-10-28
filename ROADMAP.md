@@ -51,3 +51,9 @@ Avoid adding an uninstaller, duplicate deletion, window manager, network monitor
 Ask testers which tool they used again, what other app it replaced, and what confused them. Track voluntarily shared feedback: successful first task, return use after seven days, permission failures, and defects. Keep telemetry absent unless a separate transparent opt-in design is agreed.
 
 Choose pricing only after repeat usefulness is established. The immediate goal is a reliable preview people choose to keep installed.
+
+## 0.3 implementation status
+
+The previously planned feature families now have implementations: global/in-app launcher, customizable menu panel, diagnostics, file explorer, organizer, reviewed app removal, undo history, custom work modes, presentation checks, battery history, batch image tools, drive eject, and text transforms. See README for precise scope and exclusions.
+
+Remaining release work is validation and distribution, not placeholder tool buttons: manual accessibility/appearance checks, real hardware and permission testing, measured performance, identity/icon work, Developer ID signing/notarization, and public packaging. App removal intentionally does not delete ambiguous shared data; diagnostics do not claim exact causes or per-app battery attribution. Do not market those exclusions as implemented capabilities.

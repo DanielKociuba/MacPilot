@@ -1,19 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
-
-struct WorkbenchView: View {
-    var body: some View {
-        TabView {
-            DiagnosticsView().tabItem { Label("Diagnostics", systemImage: "stethoscope") }
-            FileExplorerView().tabItem { Label("Large files", systemImage: "folder") }
-            ModesView().tabItem { Label("Work modes", systemImage: "sparkles") }
-            TextWorkbenchView().tabItem { Label("Text tools", systemImage: "textformat") }
-            ImageWorkbenchView().tabItem { Label("Images", systemImage: "photo") }
-            DrivesView().tabItem { Label("Drives", systemImage: "externaldrive") }
-        }.padding().navigationTitle("Workbench")
-    }
-}
+import Charts
 
 struct DiagnosticsView: View {
     @EnvironmentObject var stats: SystemStats
@@ -28,6 +16,7 @@ struct DiagnosticsView: View {
                     Text("Less than 10% of reported storage capacity is available. Review large files before removing anything.")
                 }
                 Text("Thermal state: \(thermalDescription)")
+                Text("Memory pressure event: \(stats.memoryPressure)")
                 Text("Memory use alone is not memory pressure. Open Activity Monitor’s Memory tab to inspect pressure and swap.").foregroundStyle(.secondary)
                 HStack {
                     Button("Open Activity Monitor") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")) }
@@ -66,8 +55,18 @@ struct FileExplorerView: View {
     @State private var files: [LargeFile] = []
     @State private var scan: Task<Void, Never>?
     @State private var busy = false
-    @State private var status = "Choose a folder to inspect. Files are never deleted by this explorer."
+    @State private var status = "Choose a folder to inspect. Review files before choosing Move to Trash."
     @State private var query = ""
+    @State private var pendingTrash: URL?
+    @State private var ageDays = 0
+    private var filtered: [LargeFile] {
+        files.filter { file in
+            let matches = query.isEmpty || file.url.lastPathComponent.localizedCaseInsensitiveContains(query)
+            guard ageDays > 0 else { return matches }
+            let date = (try? file.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date()
+            return matches && date < Date().addingTimeInterval(-Double(ageDays) * 86400)
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             PageHeading(title: "Find your biggest files", subtitle: "Inspect a folder you choose, then reveal files in Finder for review.")
@@ -78,7 +77,13 @@ struct FileExplorerView: View {
                 TextField("Filter name or extension", text: $query).textFieldStyle(.roundedBorder)
             }
             Text(status).font(.caption).foregroundStyle(.secondary)
-            List(files.filter { query.isEmpty || $0.url.lastPathComponent.localizedCaseInsensitiveContains(query) }) { file in
+            Picker("Last modified", selection: $ageDays) { Text("Any age").tag(0); Text("Over 30 days").tag(30); Text("Over 90 days").tag(90) }
+            if !filtered.isEmpty {
+                Chart(Array(filtered.prefix(6))) { file in
+                    BarMark(x: .value("Bytes", file.bytes), y: .value("File", file.url.lastPathComponent))
+                }.frame(height: 130).accessibilityLabel("Largest matching files by logical size")
+            }
+            List(filtered) { file in
                 HStack {
                     VStack(alignment: .leading) {
                         Text(file.url.lastPathComponent).font(.headline)
@@ -87,9 +92,22 @@ struct FileExplorerView: View {
                     Spacer()
                     Text(fmt(file.bytes)).monospacedDigit()
                     Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
+                    Button("Trash…", role: .destructive) { pendingTrash = file.url }
                 }.padding(.vertical, 4)
             }
         }.padding(24).onDisappear { scan?.cancel() }
+        .alert("Move this file to Trash?", isPresented: Binding(get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } })) {
+            Button("Cancel", role: .cancel) { pendingTrash = nil }
+            Button("Move to Trash", role: .destructive) {
+                guard let url = pendingTrash else { return }
+                do {
+                    guard FileSafety.regular(url) else { throw CocoaError(.fileReadNoPermission) }
+                    try ActionHistory.shared.trash(url, reason: "Large file cleanup")
+                    files.removeAll { $0.url == url }; status = ActionHistory.shared.status
+                } catch { status = error.localizedDescription }
+                pendingTrash = nil
+            }
+        } message: { Text(pendingTrash?.path ?? "") }
     }
     private func choose() {
         let picker = NSOpenPanel()
@@ -121,32 +139,6 @@ struct FileExplorerView: View {
             status = result.2 || Task.isCancelled ? "Scan cancelled." : "Largest \(files.count) files by logical size · \(result.1) unreadable locations · packages and symlinks excluded."
             busy = false
         }
-    }
-}
-
-struct ModesView: View {
-    @EnvironmentObject var tools: Tools
-    @EnvironmentObject var clipboard: ClipboardStore
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            PageHeading(title: "Ready for your next task", subtitle: "An explicit presentation preset with a reversible clipboard change.")
-            Text("Presentation mode starts a one-hour Keep Awake session and pauses clipboard capture. It does not change Focus, notifications, audio, or display settings.")
-            Text("Before presenting: check battery, select the correct audio output, and close private windows.").foregroundStyle(.secondary)
-            Button(tools.presentationCapture == nil ? "Start presentation mode" : "End presentation mode") {
-                if let previous = tools.presentationCapture {
-                    tools.setKeepAwake(false)
-                    clipboard.setEnabled(previous)
-                    tools.presentationCapture = nil
-                } else {
-                    tools.presentationCapture = clipboard.enabled
-                    clipboard.setEnabled(false)
-                    tools.setKeepAwake(true, minutes: 60)
-                }
-            }.buttonStyle(.borderedProminent).disabled(tools.presentationCapture == nil && tools.keepAwake)
-            if tools.keepAwake && tools.presentationCapture == nil { Text("Stop your existing Keep Awake session before starting this mode.").font(.caption) }
-            if tools.presentationCapture != nil { Text("Mode active. Clipboard capture remains paused until you end the mode, even after Keep Awake expires.") }
-            Spacer()
-        }.padding(24)
     }
 }
 
@@ -191,60 +183,36 @@ struct TextWorkbenchView: View {
     }
 }
 
-struct ImageWorkbenchView: View {
-    @State private var status = "Choose an image to export a new PNG or JPEG. The source stays unchanged."
-    @State private var jpeg = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            PageHeading(title: "A simpler image export", subtitle: "Convert a local image without uploading it.")
-            Toggle("Export JPEG instead of PNG", isOn: $jpeg)
-            Text("JPEG flattens transparency onto white. Export uses the image’s pixel dimensions. Animated and multi-page inputs export only one image.").foregroundStyle(.secondary)
-            Button("Choose image and export…") {
-                let input = NSOpenPanel()
-                input.allowedContentTypes = [.png, .jpeg, .tiff, .heic]
-                guard input.runModal() == .OK, let url = input.url,
-                      let source = NSImage(contentsOf: url),
-                      let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { status = "No readable image selected."; return }
-                let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: cg.width, pixelsHigh: cg.height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
-                guard let bitmap, let context = NSGraphicsContext(bitmapImageRep: bitmap) else { status = "Could not allocate image."; return }
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = context
-                let rect = NSRect(x: 0, y: 0, width: cg.width, height: cg.height)
-                if jpeg { NSColor.white.setFill(); rect.fill() }
-                context.cgContext.draw(cg, in: rect)
-                NSGraphicsContext.restoreGraphicsState()
-                let output = NSSavePanel()
-                output.allowedContentTypes = jpeg ? [.jpeg] : [.png]
-                output.nameFieldStringValue = url.deletingPathExtension().lastPathComponent + "-export." + (jpeg ? "jpg" : "png")
-                guard output.runModal() == .OK, let destination = output.url else { return }
-                guard destination.standardizedFileURL != url.standardizedFileURL else { status = "Choose a different destination to preserve the source."; return }
-                do {
-                    guard let data = bitmap.representation(using: jpeg ? .jpeg : .png, properties: [.compressionFactor: 0.85]) else { status = "Encoding failed."; return }
-                    try data.write(to: destination, options: .atomic)
-                    status = "Exported \(destination.lastPathComponent)"
-                } catch { status = error.localizedDescription }
-            }
-            Text(status).textSelection(.enabled)
-            Spacer()
-        }.padding(24)
-    }
-}
-
 struct DrivesView: View {
     @State private var volumes: [URL] = []
+    @State private var status = ""
+    @State private var eject: URL?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PageHeading(title: "Connected storage", subtitle: "Inspect mounted volumes. Use Finder’s eject control when finished.")
+            PageHeading(title: "Connected storage", subtitle: "Inspect mounted volumes and safely eject removable media.")
             Button("Refresh") { refresh() }
+            Text(status).foregroundStyle(.secondary)
             List(volumes, id: \.self) { url in
                 HStack {
                     Label(url.lastPathComponent, systemImage: "externaldrive")
                     Spacer()
                     if let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]), let capacity = values.volumeAvailableCapacity { Text("\(fmt(Int64(capacity))) available") }
                     Button("Open in Finder") { NSWorkspace.shared.open(url) }
+                    if (try? url.resourceValues(forKeys: [.volumeIsEjectableKey]).volumeIsEjectable) == true {
+                        Button("Eject…") { eject = url }
+                    }
                 }
             }
         }.padding(24).onAppear { refresh() }
+        .alert("Eject this volume?", isPresented: Binding(get: { eject != nil }, set: { if !$0 { eject = nil } })) {
+            Button("Cancel", role: .cancel) { eject = nil }
+            Button("Eject") {
+                guard let url = eject else { return }
+                do { try NSWorkspace.shared.unmountAndEjectDevice(at: url); status = "Ejected \(url.lastPathComponent)."; refresh() }
+                catch { status = "Could not eject: \(error.localizedDescription). Close files and apps using the drive, then try again." }
+                eject = nil
+            }
+        } message: { Text("Finish file transfers first. MacPilot does not force-eject busy drives.") }
     }
     private func refresh() { volumes = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeAvailableCapacityKey], options: [.skipHiddenVolumes]) ?? [] }
 }

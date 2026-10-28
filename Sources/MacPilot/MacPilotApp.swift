@@ -19,29 +19,12 @@ struct MacPilotApp: App {
         }
 
         MenuBarExtra {
-            MenuContent()
+            MenuPanel()
                 .environmentObject(stats)
                 .environmentObject(tools)
+                .environmentObject(clip)
         } label: {
             Label("\(Int(stats.cpu))%", systemImage: "gauge.with.dots.needle.67percent")
-        }
-    }
-}
-
-struct MenuContent: View {
-    @EnvironmentObject var stats: SystemStats
-    @EnvironmentObject var tools: Tools
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Text("CPU \(Int(stats.cpu))%  ·  RAM \(String(format: "%.1f", stats.memUsed))/\(String(format: "%.0f", stats.memTotal)) GB")
-        Divider()
-        Toggle("Keep Awake for 1 hour", isOn: Binding(get: { tools.keepAwake }, set: { tools.setKeepAwake($0, minutes: 60) }))
-        Button("Open MacPilot") {
-            openWindow(id: "main")
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        Divider()
-        Button("Quit") { NSApp.terminate(nil) }
+        }.menuBarExtraStyle(.window)
     }
 }
